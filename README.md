@@ -1,0 +1,308 @@
+# Driver Break — ideas
+
+Concept notes for a Navit plugin that plans routes with mode-aware rest stops, safety filters, POI discovery, fuel monitoring, and optional energy-based (eco) routing.
+
+## Table of contents
+
+1. [Core idea](#core-idea)
+2. [Concurrency: multi-core and priority threads](#concurrency-multi-core-and-priority-threads)
+3. [Travel mode ideas](#travel-mode-ideas)
+4. [POI discovery ideas](#poi-discovery-ideas)
+5. [Safety and legality ideas](#safety-and-legality-ideas)
+6. [Configurable rest parameters](#configurable-rest-parameters-idea-sketch)
+7. [Historical basis: rast and vei](#historical-basis-rast-and-vei)
+8. [Network and priority ideas](#network-and-priority-ideas)
+9. [Water safety ideas](#water-safety-ideas-hiking--cycling)
+10. [Route validation ideas](#route-validation-ideas-hiking--cycling)
+11. [Energy-based routing](#energy-based-routing-eco-mode-idea)
+12. [Elevation idea](#elevation-idea-srtm-family)
+13. [Fuel monitoring ideas](#fuel-monitoring-ideas)
+14. [History, UI, and configuration](#history-ui-and-configuration-ideas)
+15. [Mathematical formulas](#mathematical-formulas)
+
+---
+
+## Core idea
+
+Plan a route that already knows when and where you should stop, using different rules per travel mode:
+
+- **Hiking** — water refills, tent/cabin overnight spots, official hiking or pilgrimage networks; keep off motorways, trunks, and other roads unsafe on foot.
+- **Cycling** — same stop types (water, overnight, optional national cycling/pilgrimage networks); avoid roads unsafe for cyclists.
+- **Car** — rest stops with something to do (cafe, restaurant, museum, gallery, zoo, viewpoint, etc.); fuel monitoring and optional fuel-efficient routing from terrain.
+- **All modes** — no overnight camps too close to glaciers (ice avalanche risk); keep a minimum distance from buildings for right-to-roam rules such as Norwegian *allemannsretten*; optional energy-based routing for least effort or fuel.
+
+When a compatible vehicle ECU is present, live fuel consumption feeds better route cost estimates.
+
+---
+
+## Concurrency: multi-core and priority threads
+
+Must support **multiple CPU cores** and **multiple threads with different priorities**, so time-critical I/O and UI stay responsive while heavy work runs elsewhere. Workloads should be isolatable onto separate threads (and, where useful, pinned or scheduled across cores) rather than sharing one blocking loop.
+
+Suggested thread roles and relative priorities (highest first):
+
+| Thread / role | Priority | Responsibility |
+|---------------|----------|----------------|
+| **Sensors (GPS, IMU)** | Highest | Continuous position, heading, and motion samples; must not stall for map or DB work. |
+| **ECU data** | High | Live fuel / engine reads (OBD-II, J1939, MegaSquirt); poll and decode without waiting on routing or UI. |
+| **Graphical / UI** | High–medium | Map redraw, OSD, menus; keep interaction smooth while background jobs run. |
+| **Routing calculations** | Medium | Rest-stop planning, energy cost walks, route validation; CPU-heavy, parallelizable across cores when segment work allows. |
+| **Database access** | Lower | Persistent history, config, fuel samples, trip summaries; queued writes/reads so DB latency does not block sensors, ECU, or graphics. |
+
+Design constraints:
+
+- Sensor and ECU threads must not block on database locks or long routing passes.
+- Routing and energy work may use multiple worker cores; cancel or deprioritize when a new position or route invalidates in-flight results.
+- Database access is serialized or otherwise concurrency-safe, with async or batched I/O so higher-priority threads keep running.
+- Shared state (position, fuel rate, route, session break state) is published with clear ownership or lock-free / short critical sections so priorities are not inverted by long holds.
+
+---
+
+## Travel mode ideas
+
+| Mode | Idea |
+|------|------|
+| **Motorcycle** | Like car, but shorter break intervals (e.g. every 2 h) and shorter max riding periods — higher fatigue. Same POIs and fuel logic; OBD-II when available (common Euro 3+); otherwise adaptive fuel estimation. |
+| **Car** | Soft/max driving hours, break interval (e.g. 4–4.5 h), break duration (e.g. 15–45 min). |
+| **Truck** | Mandatory rest/driving rules aligned with EU EC 561/2006 (break after 4.5 h, 45 min break, daily/weekly rest limits, etc.). |
+| **Hiking** | ~40 km suggested max per day; rests at 11.295 km (main) or 2.275 km (alt); optional SRTM + water/cabin POIs. |
+| **Bicycle** | ~100 km suggested max per day; rests at 28.24 km (main) or 5.69 km (alt); same rast/vei concept as hiking, scaled up. |
+
+---
+
+## POI discovery ideas
+
+Search radii configurable (examples: water 2 km, cabins 5 km, general POI 15 km, network huts 25 km).
+
+- **Water** — drinking water tap, fountain, spring (hiking/cycling refills).
+- **Cabins / huts** — wilderness hut, alpine hut, hostel, camping; optional DNT/network prioritization.
+- **Car / truck** — cafe, restaurant, museum, gallery, zoo, aquarium, viewpoint, picnic site, tourist attraction, similar amenities.
+
+---
+
+## Safety and legality ideas
+
+### Distance from buildings (camping / allemannsretten)
+
+Overnight candidates too close to buildings or dwellings are filtered out. Default example: 150 m (configurable).
+
+### Distance from glaciers (overnight)
+
+Reject overnight spots too close to glaciers (ice avalanche, rockfall, meltwater flood risk). Default example: 300 m; can relax when there is a camping building (e.g. staffed hut).
+
+---
+
+## Configurable rest parameters (idea sketch)
+
+- **Car** — soft limit hours, max hours, break interval (h), break duration (min).
+- **Truck** — mandatory break after (h), break duration (min), max daily driving hours.
+- **Hiking / cycling** — main and alternative break distances (km), max daily distance (km).
+- **General** — rest interval range, POI radii, min distance from buildings, min distance from glaciers for overnight.
+
+---
+
+## Historical basis: rast and vei
+
+Suggested hiking/cycling defaults draw on old Scandinavian length units:
+
+- A **rast** was roughly how far you walked before needing a rest (often tied to a *mil* / ell length; regional and historical variation).
+- Rough historical anchors: ~9,100.8 m in the 900s (about 192 stone throws / four *fjerdingvei*); 12th century often as 16,000 ells — same order of magnitude.
+- A **dagsvei** (day’s journey) was commonly ~40 km on foot.
+
+Plugin defaults follow that tradition (hiking intervals + 40 km day; cycling scaled from the same idea).
+
+---
+
+## Network and priority ideas
+
+### DNT / network hut priority
+
+Optional preference for network huts with a configurable search radius. Set radius from typical nearest-neighbor spacing; raise toward the max in remote areas.
+
+**Networked cabin spacing (sample nearest-neighbor stats, for search-radius tuning):**
+
+| Region | Sample | Avg | Median | Max |
+|--------|--------|-----|--------|-----|
+| Norway (DNT, OSM relation 1110420) | 449 huts | 10.56 km | 8.83 km | 100.45 km |
+| Sweden (wilderness/alpine hut) | 439 | 12.31 km | 8.24 km | 83.85 km |
+| Sweden STF only | 42 | 14.47 km | 11.50 km | 83.85 km |
+| Finland (wilderness/alpine hut) | 324 | 11.72 km | 6.68 km | 64.32 km |
+| Finland Metsähallitus only | 108 | 16.05 km | 5.31 km | 247 km |
+| Germany (wilderness/alpine hut) | 261 | 12.98 km | 9.72 km | 119.76 km |
+| Switzerland (wilderness/alpine hut) | 328 | 4.40 km | 3.82 km | 23.70 km |
+| Austria (wilderness/alpine hut) | 330 | 5.30 km | 3.56 km | 102.51 km |
+
+**Open / non-networked huts** (no network tag; not DNT/STF/DAV/SAC/OeAV/Metsähallitus etc.):
+
+| Region | Sample | Avg | Median | Max |
+|--------|--------|-----|--------|-----|
+| Germany | 235 | 14.29 km | 10.22 km | 119.76 km |
+| Switzerland | 261 | 4.93 km | 4.03 km | 23.70 km |
+| Austria | 287 | 5.71 km | 3.65 km | 102.51 km |
+| Sweden | 395 | 12.45 km | 7.85 km | 64.86 km |
+| Finland | 206 | 17.00 km | 12.33 km | 75.75 km |
+
+Practical ranges: ~5–15 km in the Alps; ~10–20 km in Scandinavia/Germany/Finland for open huts. Use at least typical spacing (~10–12 km); raise toward max remotely.
+
+### Hiking / pilgrimage priority
+
+Optional preference for official hiking and pilgrimage routes when validating or suggesting stops.
+
+---
+
+## Water safety ideas (hiking / cycling)
+
+**Prefer treated / reliable sources**
+
+- Marked drinking water taps (`amenity=drinking_water`) in towns, trailheads, staffed cabins.
+- Staffed huts and lodges usually supply treated or reliably clean water.
+
+**Treat natural sources before drinking**
+
+- Springs, streams, rivers: treat even if they look clean (grazing, vegetation, upstream activity; *Giardia*, *Cryptosporidium*, etc.).
+- Options: boil (1 min, or 3 min above 2,000 m), certified filter (0.1 µm or finer), chemical tablets, UV pen.
+- Avoid stagnant water when possible; boil if used.
+- Near farms, roads, mining, or glacial runoff: chemical/heavy-metal risk may survive filters and boiling — find another source.
+
+Running water in North European national parks is generally considered drinkable untreated, but stay aware of rodent years even though rodent-borne illness cases are scarce.
+
+**Rough daily water needs**
+
+- Hiking: ~0.5 L per hour of activity (more in heat / altitude).
+- Cycling: ~0.5–0.75 L per hour.
+- Extra for cooking and camp use.
+
+---
+
+## Route validation ideas (hiking / cycling)
+
+- Avoid forbidden road types (motorway, trunk, primary unsafe for foot/bike).
+- Report share of priority paths (footway, path, track, steps, bridleway; pilgrimage/hiking tags when priority is on).
+- Warn on high forbidden-road % or low priority-path %.
+
+---
+
+## Energy-based routing (eco-mode) idea
+
+Model physical effort / energy per segment from weight, rolling resistance, air drag, elevation, and downhill recuperation. With a live ECU, fold measured fuel into cost so flatter / more efficient alternatives win when they exist.
+
+Configurable via OSD: drag coefficient `Cd`, frontal area (m²), total mass (kg).
+
+---
+
+## Elevation idea (SRTM family)
+
+On-demand regional elevation for better stops and energy routing. Try sources in order:
+
+1. Copernicus DEM GLO-30  
+2. Viewfinder Panoramas  
+3. NASA SRTMGL1  
+
+Downloads pausable/resumable/cancellable; progress per region.
+
+---
+
+## Fuel monitoring ideas
+
+Live ECU fuel for tracking and (with energy routing) better costs. Three backends:
+
+1. **OBD-II (ELM327)** — petrol/diesel/flex cars and light vehicles; fuel level, fuel rate, ethanol when available; MAF-based estimate if no direct fuel-rate PID; fallback to adaptive estimation.
+2. **J1939 (SocketCAN)** — trucks/heavy vehicles; engine fuel rate and fuel level on CAN; auto in truck mode when a CAN interface exists.
+3. **MegaSquirt** — MS1/MS2/MS3/MS3-Pro/MicroSquirt over serial; injector-based consumption; fallback if ECU missing.
+
+### Adaptive fuel learning
+
+Without ECU data, build a persistent consumption model from samples and trip summaries; log fuel stops with rest-stop history.
+
+---
+
+## History, UI, and configuration ideas
+
+- Persist rest/fuel history, consumption samples, trip summaries, and config across sessions.
+- Browse/clear history in GUI; menu changes save automatically.
+- OSD element with internal GUI actions: suggest rest stop, history, start/end break, configure intervals per profile, overnight settings (buildings, glaciers, POI radii).
+- Track session state: driving time, break in progress, mandatory break required.
+- Vehicle type selected via OSD configuration.
+
+---
+
+## Mathematical formulas
+
+Readable reference for how the plugin derives numbers (implementation lives in the C sources).
+
+### OBD-II — MAF-based fuel rate
+
+When PID `0x5E` (engine fuel rate) is unavailable, estimate from mass air flow (PID `0x10`):
+
+\[
+\text{Fuel rate (L/h)} = \frac{\text{MAF (g/s)} \times 3600}{\text{AFR} \times \rho \times 1000}
+\]
+
+- **MAF** — air mass flow (g/s)
+- **AFR** — air–fuel ratio (e.g. ~14.7 for petrol; adjusted by fuel type / ethanol from PID `0x52`)
+- **ρ** — fuel density (kg/L, e.g. ~0.745 for petrol)
+
+### J1939 — fuel rate and fuel level
+
+- **SPN 183** (PGN 65266 / FEEA): 0.05 L/h per bit, offset 0
+
+\[
+\text{fuel\_rate\_L\_h} = \text{raw\_spn183} \times 0.05
+\]
+
+- **SPN 96** (PGN 65276 / FEF4): 0.4 % per bit, range 0–250 %
+
+\[
+\text{fuel\_level\_\%} = \text{raw\_spn96} \times 0.4
+\]
+
+\[
+\text{fuel\_current\_L} = \frac{\text{fuel\_level\_\%}}{100} \times \text{tank\_capacity\_L}
+\]
+
+### MegaSquirt — injector-based fuel rate
+
+Inputs: injector pulse width `pw_ms` (ms), engine `rpm`, cylinder count `n_cyl`, injector flow `flow_cc_min` (cc/min).
+
+\[
+\text{fuel\_rate\_L\_h} =
+\frac{\text{pw\_ms} \times \text{rpm} \times n_{\text{cyl}} \times \text{flow\_cc\_min}}{2\,000\,000}
+\]
+
+Rationale sketch: pulses/min scale with RPM; each pulse delivers `flow_cc_min / 60` cc/s at 100 % duty; duty cycle is `pw_ms / 1000` of the cycle. Out-of-range RPM / pulse width / rate updates are skipped.
+
+### Range estimation
+
+From current fuel and average consumption (`fuel_avg_consumption_x10` → L/100 km):
+
+\[
+\text{range\_km} =
+\frac{\text{fuel\_current\_L} \times 100}{\text{consumption\_L\_per\_100km}}
+\]
+
+Short-term adaptive averages from live samples can refine this.
+
+### Energy-based routing (eco-mode)
+
+Segment energy cost is proportional to:
+
+\[
+E \approx
+(F_{\text{rolling}} + F_{\text{drag}}) \times d
++ m g \Delta h
+\]
+
+- \(F_{\text{rolling}}\) — rolling resistance  
+- \(F_{\text{drag}}\) — aerodynamic drag  
+- \(d\) — segment length  
+- \(m\) — total mass  
+- \(g\) — gravity  
+- \(\Delta h\) — height difference  
+
+Drag from user `Cd` and frontal area \(A\), with sea-level air density \(\rho \approx 1.225\,\mathrm{kg/m^3}\):
+
+\[
+F_{\text{drag}} \propto \tfrac{1}{2}\,\rho\,C_d A\,v^2
+\]
+
+Temperature and elevation still adjust the coefficient inside each segment. Rolling resistance uses a fixed coefficient times weight in the model initializer. Live ECU fuel can be compared to energy predictions so lower-energy (and thus lower-fuel) routes are preferred.
