@@ -2,9 +2,19 @@
 
 Concept notes for mode-aware rest stops, safety filters, POI discovery, fuel and charge monitoring, and optional energy-based (eco) routing. The ideas started around a Navit plugin, but they are meant for **any open source navigation unit** that can host the same behaviours — not Navit alone.
 
-Electric modes must stay **compatible with charging stations**: discover suitable chargers along the route, plan charge stops with the same history model as fuel stops, and align with common station/vehicle charge interfaces where the unit can participate (connector types, power levels, and high-level protocols documented in `PROTOCOLS.md`).
+Electric modes must stay **compatible with charging stations**: discover suitable chargers along the route, plan charge stops with the same history model as fuel stops, and align with common station/vehicle charge interfaces where the unit can participate (connector types, power levels, and high-level protocols documented in [PROTOCOLS.md](PROTOCOLS.md)).
 
-The map must support **moving icons** (dynamic positions that update in place), especially for APRS station tracking — see `APRS.md`. Elevation download APIs are in `API.md`.
+The map must support **moving icons** (dynamic positions that update in place), especially for APRS station tracking — see [APRS.md](APRS.md). Elevation download APIs are in [API.md](API.md). Radio CAT (via Hamlib) is in [CAT.md](CAT.md).
+
+## Documents
+
+| Document | Contents |
+|----------|----------|
+| [README.md](README.md) | This file — product ideas overview |
+| [PROTOCOLS.md](PROTOCOLS.md) | OBD-II, J1939, MegaSquirt, electric vehicles, charging stations |
+| [API.md](API.md) | Copernicus DEM GLO-30, Viewfinder Panoramas, NASA SRTMGL1 |
+| [APRS.md](APRS.md) | Moving icons, APRS decode, range, QRV/CAT, symbols |
+| [CAT.md](CAT.md) | Radio CAT via Hamlib; baud rates, serial formats, vendor notes |
 
 ## Table of contents
 
@@ -12,21 +22,23 @@ The map must support **moving icons** (dynamic positions that update in place), 
 2. [Concurrency: multi-core and priority threads](#concurrency-multi-core-and-priority-threads)
 3. [Travel mode ideas](#travel-mode-ideas)
 4. [POI discovery ideas](#poi-discovery-ideas)
-5. [Moving icons (APRS and similar)](#moving-icons-aprs-and-similar)
-6. [Safety and legality ideas](#safety-and-legality-ideas)
-7. [Configurable rest parameters](#configurable-rest-parameters-idea-sketch)
-8. [Historical basis: rast and vei](#historical-basis-rast-and-vei)
-9. [Network and priority ideas](#network-and-priority-ideas)
-10. [Water safety ideas](#water-safety-ideas-hiking--cycling)
-11. [Route validation ideas](#route-validation-ideas-hiking--cycling)
-12. [Energy-based routing](#energy-based-routing-eco-mode-idea)
-13. [Elevation idea](#elevation-idea-srtm-family)
-14. [Fuel and charge monitoring ideas](#fuel-and-charge-monitoring-ideas)
-15. [History, UI, and configuration](#history-ui-and-configuration-ideas)
-16. [Mathematical formulas](#mathematical-formulas)
-17. Vehicle / ECU protocols — see `PROTOCOLS.md`
-18. Elevation source APIs — see `API.md`
-19. APRS / moving icons — see `APRS.md`
+5. [Map layers](#map-layers)
+6. [Moving icons (APRS and similar)](#moving-icons-aprs-and-similar)
+7. [Safety and legality ideas](#safety-and-legality-ideas)
+8. [Configurable rest parameters](#configurable-rest-parameters-idea-sketch)
+9. [Historical basis: rast and vei](#historical-basis-rast-and-vei)
+10. [Network and priority ideas](#network-and-priority-ideas)
+11. [Water safety ideas](#water-safety-ideas-hiking--cycling)
+12. [Route validation ideas](#route-validation-ideas-hiking--cycling)
+13. [Energy-based routing](#energy-based-routing-eco-mode-idea)
+14. [Elevation idea](#elevation-idea-srtm-family)
+15. [Fuel and charge monitoring ideas](#fuel-and-charge-monitoring-ideas)
+16. [History, UI, and configuration](#history-ui-and-configuration-ideas)
+17. [Mathematical formulas](#mathematical-formulas)
+18. [Vehicle / ECU protocols](PROTOCOLS.md)
+19. [Elevation source APIs](API.md)
+20. [APRS / moving icons](APRS.md)
+21. [CAT radio control](CAT.md)
 
 ---
 
@@ -81,20 +93,38 @@ Design constraints:
 
 ## POI discovery ideas
 
-Search radii configurable (examples: water 2 km, cabins 5 km, general POI 15 km, network huts 25 km).
+Search radii configurable (examples: water 2 km, cabins 5 km, general POI 15 km, network huts 25 km). **POI icons must come from OSM** (standard OpenStreetMap icon set / tag-matched icons), including on every basemap layer below.
 
 - **Water** — drinking water tap, fountain, spring (hiking/cycling refills).
+- **Public restrooms** — toilets / public conveniences (`amenity=toilets` and equivalents); included in discovery for all relevant travel modes.
 - **Cabins / huts** — wilderness hut, alpine hut, hostel, camping; optional DNT/network prioritization.
 - **Car / truck** — cafe, restaurant, museum, gallery, zoo, aquarium, viewpoint, picnic site, tourist attraction, similar amenities.
 - **Charging stations** — for electric modes: public and semi-public chargers filtered by connector type, power (kW), access (membership/payment), and vehicle compatibility; usable as planned charge stops along the route.
 
 ---
 
+## Map layers
+
+Basemap selection (numbered); default is layer 1. All layers use **OSM POI icons** for discovered POIs (restrooms, water, chargers, etc.).
+
+| Number | Layer | Role |
+|--------|-------|------|
+| **1** (default) | Standard OSM | General navigation |
+| **2** | Tracestrack Topo | Topographic / terrain-oriented |
+| **3** | CyclOSM | Cycling-oriented rendering |
+| **4** | Cycle Map | Classic cycle map style |
+
+---
+
 ## Moving icons (APRS and similar)
 
-The host must render **moving icons**: map markers whose coordinates update when new telemetry arrives, without creating a duplicate marker per update. Primary use is APRS (callsign-keyed stations with symbol-table icons that track mobiles as they beacon). Same mechanism can serve other live tracks later.
+The host must render **moving icons**: map markers whose coordinates update when new telemetry arrives, without creating a duplicate marker per update. Primary use is APRS (callsign-keyed stations with symbol-table icons that track mobiles as they beacon).
 
-Details: symbol tables, packet sources, SDR/NMEA ingest, range filtering, and expiration — `APRS.md`.
+Hard rules for APRS display (see [APRS.md](APRS.md)):
+
+- Show stations only within a **hardcoded 50–150 km** window (VHF/UHF reach); no unlimited range.
+- Station timeout **must not exceed 3600 s** (beacon intervals may run ~20–3000 s with speed).
+- Decoder handles **water** info and **QRV/qrv + frequency** (e.g. `146.500 MHz`, `145,500 mhz`) for optional CAT radio tune ([CAT.md](CAT.md)); label those stations with a leading `*`; full message only at **zoom > 14**.
 
 ---
 
@@ -102,11 +132,11 @@ Details: symbol tables, packet sources, SDR/NMEA ingest, range filtering, and ex
 
 ### Distance from buildings (camping / allemannsretten)
 
-Overnight candidates too close to buildings or dwellings are filtered out. Default example: 150 m (configurable).
+Overnight candidates too close to buildings or dwellings are filtered out. **Hardcoded default: 150 m** for Norwegian *allemannsretten* and similar right-to-roam rules.
 
 ### Distance from glaciers (overnight)
 
-Reject overnight spots too close to glaciers (ice avalanche, rockfall, meltwater flood risk). Default example: 300 m; can relax when there is a camping building (e.g. staffed hut).
+Reject overnight spots too close to glaciers (ice avalanche, rockfall, meltwater flood risk). **Minimum distance: 1000 m**, hardcoded as the default floor. This check is **overridden** when the candidate is (or is at) a recognised camping site, hut, cabin, or similar overnight facility — those established sites remain allowed even if nearer a glacier than 1000 m.
 
 ---
 
@@ -222,13 +252,13 @@ Try sources in order:
 2. Viewfinder Panoramas  
 3. NASA SRTMGL1  
 
-Downloads pausable/resumable/cancellable; progress tracked per region or per country job. How each source is listed, named, authenticated, and fetched is documented in `API.md`.
+Downloads pausable/resumable/cancellable; progress tracked per region or per country job. How each source is listed, named, authenticated, and fetched is documented in [API.md](API.md).
 
 ---
 
 ## Fuel and charge monitoring ideas
 
-Live ECU/BMS data for tracking and (with energy routing) better costs. Must work with **charging stations** for electric modes: suggest and log charge stops at compatible stations, and keep station metadata (connector, power, access) usable across open source navigation hosts. Protocol details for OBD-II, J1939, MegaSquirt, electric vehicles, and charging-station interfaces are in `PROTOCOLS.md`. Three ICE backends:
+Live ECU/BMS data for tracking and (with energy routing) better costs. Must work with **charging stations** for electric modes: suggest and log charge stops at compatible stations, and keep station metadata (connector, power, access) usable across open source navigation hosts. Protocol details for OBD-II, J1939, MegaSquirt, electric vehicles, and charging-station interfaces are in [PROTOCOLS.md](PROTOCOLS.md). Three ICE backends:
 
 1. **OBD-II (ELM327)** — petrol/diesel/flex cars and light vehicles; fuel level, fuel rate, ethanol when available; MAF-based estimate if no direct fuel-rate PID; fallback to adaptive estimation.
 2. **J1939 (SocketCAN)** — trucks/heavy vehicles; engine fuel rate and fuel level on CAN; auto in truck mode when a CAN interface exists.
