@@ -1,6 +1,6 @@
 # Driver Break — ideas
 
-Concept notes for mode-aware rest stops, safety filters, POI discovery, fuel and charge monitoring, and optional energy-based (eco) routing. The ideas started around a Navit plugin, but they are meant for **any open source navigation unit** that can host the same behaviours — not Navit alone.
+Concept notes for mode-aware rest stops, safety filters, POI discovery, fuel and charge monitoring, and optional energy-based (eco) routing. The product is a **new, from-scratch** navigation app (not a Navit plugin); see [architecture.md](architecture.md) for the Rust core, thread model, and WASM plugin host. Idea-level behaviours may still interest other open source navigation projects.
 
 Electric modes must stay **compatible with charging stations**: discover suitable chargers along the route, plan charge stops with the same history model as fuel stops, and align with common station/vehicle charge interfaces where the unit can participate (connector types, power levels, and high-level protocols documented in [PROTOCOLS.md](PROTOCOLS.md)).
 
@@ -11,6 +11,7 @@ The map must support **moving icons** (dynamic positions that update in place), 
 | Document | Contents |
 |----------|----------|
 | [README.md](README.md) | This file — product ideas overview |
+| [architecture.md](architecture.md) | Technical architecture: core, threads, WASM plugins, multi-arch |
 | [PROTOCOLS.md](PROTOCOLS.md) | OBD-II, J1939, MegaSquirt, electric vehicles, charging stations |
 | [API.md](API.md) | Copernicus DEM GLO-30, Viewfinder Panoramas, NASA SRTMGL1 |
 | [APRS.md](APRS.md) | Moving icons, APRS decode, range, QRV/CAT, symbols |
@@ -18,27 +19,28 @@ The map must support **moving icons** (dynamic positions that update in place), 
 
 ## Table of contents
 
-1. [Core idea](#core-idea)
-2. [Concurrency: multi-core and priority threads](#concurrency-multi-core-and-priority-threads)
-3. [Travel mode ideas](#travel-mode-ideas)
-4. [POI discovery ideas](#poi-discovery-ideas)
-5. [Map layers](#map-layers)
-6. [Moving icons (APRS and similar)](#moving-icons-aprs-and-similar)
-7. [Safety and legality ideas](#safety-and-legality-ideas)
-8. [Configurable rest parameters](#configurable-rest-parameters-idea-sketch)
-9. [Historical basis: rast and vei](#historical-basis-rast-and-vei)
-10. [Network and priority ideas](#network-and-priority-ideas)
-11. [Water safety ideas](#water-safety-ideas-hiking--cycling)
-12. [Route validation ideas](#route-validation-ideas-hiking--cycling)
-13. [Energy-based routing](#energy-based-routing-eco-mode-idea)
-14. [Elevation idea](#elevation-idea-srtm-family)
-15. [Fuel and charge monitoring ideas](#fuel-and-charge-monitoring-ideas)
-16. [History, UI, and configuration](#history-ui-and-configuration-ideas)
-17. [Mathematical formulas](#mathematical-formulas)
-18. [Vehicle / ECU protocols](PROTOCOLS.md)
-19. [Elevation source APIs](API.md)
-20. [APRS / moving icons](APRS.md)
-21. [CAT radio control](CAT.md)
+1. [Technical architecture](architecture.md)
+2. [Core idea](#core-idea)
+3. [Concurrency: multi-core and priority threads](#concurrency-multi-core-and-priority-threads)
+4. [Travel mode ideas](#travel-mode-ideas)
+5. [POI discovery ideas](#poi-discovery-ideas)
+6. [Map layers](#map-layers)
+7. [Moving icons (APRS and similar)](#moving-icons-aprs-and-similar)
+8. [Safety and legality ideas](#safety-and-legality-ideas)
+9. [Configurable rest parameters](#configurable-rest-parameters-idea-sketch)
+10. [Historical basis: rast and vei](#historical-basis-rast-and-vei)
+11. [Network and priority ideas](#network-and-priority-ideas)
+12. [Water safety ideas](#water-safety-ideas-hiking--cycling)
+13. [Route validation ideas](#route-validation-ideas-hiking--cycling)
+14. [Energy-based routing](#energy-based-routing-eco-mode-idea)
+15. [Elevation idea](#elevation-idea-srtm-family)
+16. [Fuel and charge monitoring ideas](#fuel-and-charge-monitoring-ideas)
+17. [History, UI, and configuration](#history-ui-and-configuration-ideas)
+18. [Mathematical formulas](#mathematical-formulas)
+19. [Vehicle / ECU protocols](PROTOCOLS.md)
+20. [Elevation source APIs](API.md)
+21. [APRS / moving icons](APRS.md)
+22. [CAT radio control](CAT.md)
 
 ---
 
