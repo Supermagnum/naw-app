@@ -1,6 +1,6 @@
 # Driver Break — ideas
 
-Concept notes for mode-aware rest stops, safety filters, POI discovery, fuel and charge monitoring, and optional energy-based (eco) routing. The product is a **new, from-scratch** navigation app (not a Navit plugin); see [architecture.md](architecture.md) for the Rust core, thread model, and WASM plugin host. Idea-level behaviours may still interest other open source navigation projects.
+Concept notes for mode-aware rest stops, safety filters, POI discovery, fuel and charge monitoring, and optional energy-based (eco) routing app or plugin. The product is optional a **new, from-scratch** navigation app (not a Navit plugin); see [architecture.md](architecture.md) for the Rust core, thread model, and WASM plugin host. Idea-level behaviours may still interest other open source navigation projects.
 
 Electric modes must stay **compatible with charging stations**: discover suitable chargers along the route, plan charge stops with the same history model as fuel stops, and align with common station/vehicle charge interfaces where the unit can participate (connector types, power levels, and high-level protocols documented in [PROTOCOLS.md](PROTOCOLS.md)).
 
