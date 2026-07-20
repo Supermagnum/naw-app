@@ -28,7 +28,7 @@ Related: [CAT.md](CAT.md) — CAT commands are supported through **Hamlib** (bau
 APRS stations (vehicles, hikers, balloons, fixed digipeaters, etc.) beacon positions over amateur radio (and sometimes network feeds). The navigation unit should:
 
 - Ingest AX.25 / APRS frames from RF (SDR), NMEA/TNC serial, or network.
-- Store callsign, position, symbol, course/speed, comment, water-related fields, QRV/frequency flags, and last-heard time.
+- Store callsign, position, symbol, course/speed, comment, weather-related fields, QRV/frequency flags, and last-heard time.
 - Show each station as a **map icon that moves** when a new position arrives.
 - Expire stale stations after a timeout **no greater than 3600 seconds** (see below).
 
@@ -169,19 +169,17 @@ SDR DSP sketch: mix to baseband → DC block → FM discriminator → bit PLL �
 
 ---
 
-## Decoder: water, QRV, and CAT frequency
+## Decoder: weater, QRV, and CAT frequency
 
 The decoder must inspect the APRS information field / comment, not only lat/lon and symbol.
 
-### Water information
+### Weater information
 
-Parse and store water-related content when present, for example:
+Parse and store weater-related content when present, for example:
 
-- APRS weather / hydrology style fields where the packet type carries them.
-- Free-text mentions useful to hikers and boaters (water, flood, tide, well, spring, etc.) so the UI can flag or filter stations that advertise water context.
+- APRS weatherfields where the packet type carries them.
+- Free-text mentions useful to hikers and boaters (weater, flood, tide, well, spring, etc.) so the UI can flag or filter stations that advertise weater context.
 - Keep raw comment text; attach structured flags/fields when recognition is confident.
-
-Water-aware decode feeds the same rest/POI story as hiking modes (awareness on the live map), without replacing OSM water POIs.
 
 ### QRV and frequency → CAT
 
