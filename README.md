@@ -1,6 +1,10 @@
 # Driver Break — ideas
 
-Concept notes for a Navit plugin that plans routes with mode-aware rest stops, safety filters, POI discovery, fuel monitoring, and optional energy-based (eco) routing.
+Concept notes for mode-aware rest stops, safety filters, POI discovery, fuel and charge monitoring, and optional energy-based (eco) routing. The ideas started around a Navit plugin, but they are meant for **any open source navigation unit** that can host the same behaviours — not Navit alone.
+
+Electric modes must stay **compatible with charging stations**: discover suitable chargers along the route, plan charge stops with the same history model as fuel stops, and align with common station/vehicle charge interfaces where the unit can participate (connector types, power levels, and high-level protocols documented in `PROTOCOLS.md`).
+
+The map must support **moving icons** (dynamic positions that update in place), especially for APRS station tracking — see `APRS.md`. Elevation download APIs are in `API.md`.
 
 ## Table of contents
 
@@ -8,17 +12,21 @@ Concept notes for a Navit plugin that plans routes with mode-aware rest stops, s
 2. [Concurrency: multi-core and priority threads](#concurrency-multi-core-and-priority-threads)
 3. [Travel mode ideas](#travel-mode-ideas)
 4. [POI discovery ideas](#poi-discovery-ideas)
-5. [Safety and legality ideas](#safety-and-legality-ideas)
-6. [Configurable rest parameters](#configurable-rest-parameters-idea-sketch)
-7. [Historical basis: rast and vei](#historical-basis-rast-and-vei)
-8. [Network and priority ideas](#network-and-priority-ideas)
-9. [Water safety ideas](#water-safety-ideas-hiking--cycling)
-10. [Route validation ideas](#route-validation-ideas-hiking--cycling)
-11. [Energy-based routing](#energy-based-routing-eco-mode-idea)
-12. [Elevation idea](#elevation-idea-srtm-family)
-13. [Fuel monitoring ideas](#fuel-monitoring-ideas)
-14. [History, UI, and configuration](#history-ui-and-configuration-ideas)
-15. [Mathematical formulas](#mathematical-formulas)
+5. [Moving icons (APRS and similar)](#moving-icons-aprs-and-similar)
+6. [Safety and legality ideas](#safety-and-legality-ideas)
+7. [Configurable rest parameters](#configurable-rest-parameters-idea-sketch)
+8. [Historical basis: rast and vei](#historical-basis-rast-and-vei)
+9. [Network and priority ideas](#network-and-priority-ideas)
+10. [Water safety ideas](#water-safety-ideas-hiking--cycling)
+11. [Route validation ideas](#route-validation-ideas-hiking--cycling)
+12. [Energy-based routing](#energy-based-routing-eco-mode-idea)
+13. [Elevation idea](#elevation-idea-srtm-family)
+14. [Fuel and charge monitoring ideas](#fuel-and-charge-monitoring-ideas)
+15. [History, UI, and configuration](#history-ui-and-configuration-ideas)
+16. [Mathematical formulas](#mathematical-formulas)
+17. Vehicle / ECU protocols — see `PROTOCOLS.md`
+18. Elevation source APIs — see `API.md`
+19. APRS / moving icons — see `APRS.md`
 
 ---
 
@@ -29,9 +37,10 @@ Plan a route that already knows when and where you should stop, using different 
 - **Hiking** — water refills, tent/cabin overnight spots, official hiking or pilgrimage networks; keep off motorways, trunks, and other roads unsafe on foot.
 - **Cycling** — same stop types (water, overnight, optional national cycling/pilgrimage networks); avoid roads unsafe for cyclists.
 - **Car** — rest stops with something to do (cafe, restaurant, museum, gallery, zoo, viewpoint, etc.); fuel monitoring and optional fuel-efficient routing from terrain.
-- **All modes** — no overnight camps too close to glaciers (ice avalanche risk); keep a minimum distance from buildings for right-to-roam rules such as Norwegian *allemannsretten*; optional energy-based routing for least effort or fuel.
+- **Electric vehicles (car, motorcycle, cycle)** — same rest logic as the matching travel mode, plus charge-stop planning at compatible charging stations (power, connector, and access constraints).
+- **All modes** — no overnight camps too close to glaciers (ice avalanche risk); keep a minimum distance from buildings for right-to-roam rules such as Norwegian *allemannsretten*; optional energy-based routing for least effort, fuel, or electrical energy.
 
-When a compatible vehicle ECU is present, live fuel consumption feeds better route cost estimates.
+When a compatible vehicle ECU or BMS is present, live fuel or energy use feeds better route cost estimates. Charge stops and fuel stops share one stop history.
 
 ---
 
@@ -45,7 +54,7 @@ Suggested thread roles and relative priorities (highest first):
 |---------------|----------|----------------|
 | **Sensors (GPS, IMU)** | Highest | Continuous position, heading, and motion samples; must not stall for map or DB work. |
 | **ECU data** | High | Live fuel / engine reads (OBD-II, J1939, MegaSquirt); poll and decode without waiting on routing or UI. |
-| **Graphical / UI** | High–medium | Map redraw, OSD, menus; keep interaction smooth while background jobs run. |
+| **Graphical / UI** | High–medium | Map redraw, display, menus, moving-icon updates; keep interaction smooth while background jobs run. |
 | **Routing calculations** | Medium | Rest-stop planning, energy cost walks, route validation; CPU-heavy, parallelizable across cores when segment work allows. |
 | **Database access** | Lower | Persistent history, config, fuel samples, trip summaries; queued writes/reads so DB latency does not block sensors, ECU, or graphics. |
 
@@ -77,6 +86,15 @@ Search radii configurable (examples: water 2 km, cabins 5 km, general POI 15 km,
 - **Water** — drinking water tap, fountain, spring (hiking/cycling refills).
 - **Cabins / huts** — wilderness hut, alpine hut, hostel, camping; optional DNT/network prioritization.
 - **Car / truck** — cafe, restaurant, museum, gallery, zoo, aquarium, viewpoint, picnic site, tourist attraction, similar amenities.
+- **Charging stations** — for electric modes: public and semi-public chargers filtered by connector type, power (kW), access (membership/payment), and vehicle compatibility; usable as planned charge stops along the route.
+
+---
+
+## Moving icons (APRS and similar)
+
+The host must render **moving icons**: map markers whose coordinates update when new telemetry arrives, without creating a duplicate marker per update. Primary use is APRS (callsign-keyed stations with symbol-table icons that track mobiles as they beacon). Same mechanism can serve other live tracks later.
+
+Details: symbol tables, packet sources, SDR/NMEA ingest, range filtering, and expiration — `APRS.md`.
 
 ---
 
@@ -177,6 +195,7 @@ Running water in North European national parks is generally considered drinkable
 ## Route validation ideas (hiking / cycling)
 
 - Avoid forbidden road types (motorway, trunk, primary unsafe for foot/bike).
+- Avoid military areas: `landuse=military` and `military=danger_area` (routes and rest/overnight candidates).
 - Report share of priority paths (footway, path, track, steps, bridleway; pilgrimage/hiking tags when priority is on).
 - Warn on high forbidden-road % or low priority-path %.
 
@@ -186,25 +205,30 @@ Running water in North European national parks is generally considered drinkable
 
 Model physical effort / energy per segment from weight, rolling resistance, air drag, elevation, and downhill recuperation. With a live ECU, fold measured fuel into cost so flatter / more efficient alternatives win when they exist.
 
-Configurable via OSD: drag coefficient `Cd`, frontal area (m²), total mass (kg).
+Configurable via host UI: drag coefficient `Cd`, frontal area (m²), total mass (kg).
 
 ---
 
 ## Elevation idea (SRTM family)
 
-On-demand regional elevation for better stops and energy routing. Try sources in order:
+On-demand elevation for better stops and energy routing. Scope options:
+
+- **Region** — tiles covering a selected map region or bounding box.
+- **Entire country** — all tiles for a chosen country in one download job.
+
+Try sources in order:
 
 1. Copernicus DEM GLO-30  
 2. Viewfinder Panoramas  
 3. NASA SRTMGL1  
 
-Downloads pausable/resumable/cancellable; progress per region.
+Downloads pausable/resumable/cancellable; progress tracked per region or per country job. How each source is listed, named, authenticated, and fetched is documented in `API.md`.
 
 ---
 
-## Fuel monitoring ideas
+## Fuel and charge monitoring ideas
 
-Live ECU fuel for tracking and (with energy routing) better costs. Three backends:
+Live ECU/BMS data for tracking and (with energy routing) better costs. Must work with **charging stations** for electric modes: suggest and log charge stops at compatible stations, and keep station metadata (connector, power, access) usable across open source navigation hosts. Protocol details for OBD-II, J1939, MegaSquirt, electric vehicles, and charging-station interfaces are in `PROTOCOLS.md`. Three ICE backends:
 
 1. **OBD-II (ELM327)** — petrol/diesel/flex cars and light vehicles; fuel level, fuel rate, ethanol when available; MAF-based estimate if no direct fuel-rate PID; fallback to adaptive estimation.
 2. **J1939 (SocketCAN)** — trucks/heavy vehicles; engine fuel rate and fuel level on CAN; auto in truck mode when a CAN interface exists.
@@ -212,23 +236,34 @@ Live ECU fuel for tracking and (with energy routing) better costs. Three backend
 
 ### Adaptive fuel learning
 
-Without ECU data, build a persistent consumption model from samples and trip summaries; log fuel stops with rest-stop history.
+Without ECU/BMS data, build a persistent consumption model from samples and trip summaries. Fuel stops and charge stops are logged alongside rest-stop history so a trip shows rest, refuel, and charge events in one timeline.
+
+### Time across power-off
+
+The navigation unit must know how much time elapsed while it was turned off (for driving/rest clocks, mandatory truck breaks, trip summaries, and history timestamps). Preference order for wall-clock time:
+
+1. **GPS time** — preferred when the unit has no reliable RTC; use the time from a GNSS fix as soon as available after boot.
+2. **RTC** — use a hardware real-time clock when present and trusted.
+3. **Last-known + monotonic** — if neither GPS nor RTC is available yet, keep relative elapsed time with the monotonic clock and backfill absolute timestamps once GPS (or RTC) is valid.
+
+On shutdown, persist last shutdown time (and session state). On boot, compute offline duration before continuing driving/rest accounting so a powered-down overnight stop is not counted as continuous driving.
 
 ---
 
 ## History, UI, and configuration ideas
 
-- Persist rest/fuel history, consumption samples, trip summaries, and config across sessions.
-- Browse/clear history in GUI; menu changes save automatically.
-- OSD element with internal GUI actions: suggest rest stop, history, start/end break, configure intervals per profile, overnight settings (buildings, glaciers, POI radii).
-- Track session state: driving time, break in progress, mandatory break required.
-- Vehicle type selected via OSD configuration.
+- Persist rest / fuel / charge history, consumption samples, trip summaries, and config across sessions. Fuel and charge stops appear in the same history view as rest stops.
+- Browse/clear history in the host UI; menu changes save automatically.
+- Host UI actions: suggest rest stop, suggest charge/fuel stop, history, start/end break, configure intervals per profile, overnight settings (buildings, glaciers, POI radii), charging-station filters (connector, power, access).
+- Track session state: driving time, break in progress, mandatory break required — including time while powered off (see above).
+- Vehicle type selected via host configuration.
+- Keep behaviour portable: other open source navigation units should be able to host the same stop logic, energy model, and station compatibility without depending on one proprietary stack.
 
 ---
 
 ## Mathematical formulas
 
-Readable reference for how the plugin derives numbers (implementation lives in the C sources).
+Readable reference for how an implementation derives numbers (concrete code may live in C or the host’s native language).
 
 ### OBD-II — MAF-based fuel rate
 
