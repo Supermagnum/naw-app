@@ -1,6 +1,6 @@
-# Driver Break — technical architecture
+# technical architecture
 
-Engineering reference for a **new, from-scratch** driver/traveler-assistance navigation application (working name: **Driver Break**). This is **not** a plugin into Navit or any other existing navigation binary. The product owns its own core, map stack, routing, sensors, and a sandboxed plugin host.
+Engineering reference for a **new, from-scratch** driver/traveler-assistance navigation application. This is **not** a plugin into Navit or any other existing navigation binary. The product owns its own core, map stack, routing, sensors, and a sandboxed plugin host.
 
 **Implementation language:** Rust for core, plugin host, and plugin SDK.  
 **Plugin sandbox:** WebAssembly (WASM), executed with a host such as **wasmtime**.  
