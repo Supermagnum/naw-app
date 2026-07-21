@@ -166,7 +166,14 @@ Suggested hiking/cycling defaults draw on old Scandinavian length units:
 - That younger Norse mile (**rast** / **vei**) was **9,100.8 m** (32,000 feet). The same order of magnitude appears in 12th-century expressions such as 16,000 ells.
 - A **dagsvei** (day’s journey) was commonly ~40 km on foot.
 
-Plugin defaults follow that tradition (hiking main/alternative breaks at 11.295 km / 2.275 km and ~40 km day; cycling scaled from the same idea).
+Defaults follow that tradition:
+
+| Mode | Main rest interval | Alternative rest interval | Suggested daily max |
+|------|--------------------|---------------------------|---------------------|
+| **Hiking** | **11.295 km** | **2.275 km** | **40 km** |
+| **Cycling** | **28.24 km** | **5.69 km** | **100 km** |
+
+Cycling uses the same rast/vei concept as hiking, with distances scaled up (main ≈ 2.5× hiking main; alternative ≈ 2.5× hiking alternative; daily max 100 km vs 40 km).
 
 ---
 
