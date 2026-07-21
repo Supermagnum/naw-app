@@ -159,11 +159,14 @@ Reject overnight spots too close to glaciers (ice avalanche, rockfall, meltwater
 
 Suggested hiking/cycling defaults draw on old Scandinavian length units:
 
-- A **rast** was roughly how far you walked before needing a rest (often tied to a *mil* / ell length; regional and historical variation).
-- Rough historical anchors: ~9,100.8 m in the 900s (about 192 stone throws / four *fjerdingvei*); 12th century often as 16,000 ells — same order of magnitude.
+- A **rast** (also **vei**) was roughly how far you walked before needing a rest (often tied to a *mil* / ell length; regional and historical variation).
+- A **stone’s throw** was **120 ells** (also called a “great hundred”) — about **56.88 m** (200 feet).
+- There were **4 stone’s throws** in an **arrow’s flight**, so about **480 ells** — **227.52 m** (800 feet) around the year **900**.
+- Later in the Middle Ages, **10 arrow shots** made up a **fjerding** of a mile — **2,275.2 m** (8,000 feet), a quarter of a younger Norse mile.
+- That younger Norse mile (**rast** / **vei**) was **9,100.8 m** (32,000 feet). The same order of magnitude appears in 12th-century expressions such as 16,000 ells.
 - A **dagsvei** (day’s journey) was commonly ~40 km on foot.
 
-Plugin defaults follow that tradition (hiking intervals + 40 km day; cycling scaled from the same idea).
+Plugin defaults follow that tradition (hiking main/alternative breaks at 11.295 km / 2.275 km and ~40 km day; cycling scaled from the same idea).
 
 ---
 
