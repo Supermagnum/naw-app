@@ -13,7 +13,7 @@ The map must support **moving icons** (dynamic positions that update in place), 
 | [README.md](README.md) | This file — product ideas overview |
 | [architecture.md](architecture.md) | Technical architecture: core, threads, WASM plugins, multi-arch |
 | [PROTOCOLS.md](PROTOCOLS.md) | OBD-II, J1939, MegaSquirt, electric vehicles, charging stations |
-| [API.md](API.md) | Copernicus DEM GLO-30, Viewfinder Panoramas, NASA SRTMGL1 |
+| [API.md](API.md) | Geofabrik OSM extracts; elevation APIs; external data sources table |
 | [APRS.md](APRS.md) | Moving icons, APRS decode, range, QRV/CAT, symbols |
 | [CAT.md](CAT.md) | Radio CAT via Hamlib; baud rates, serial formats, vendor notes |
 
@@ -26,21 +26,22 @@ The map must support **moving icons** (dynamic positions that update in place), 
 5. [POI discovery ideas](#poi-discovery-ideas)
 6. [Map layers](#map-layers)
 7. [Moving icons (APRS and similar)](#moving-icons-aprs-and-similar)
-8. [Safety and legality ideas](#safety-and-legality-ideas)
-9. [Configurable rest parameters](#configurable-rest-parameters-idea-sketch)
-10. [Historical basis: rast and vei](#historical-basis-rast-and-vei)
-11. [Network and priority ideas](#network-and-priority-ideas)
-12. [Water safety ideas](#water-safety-ideas-hiking--cycling)
-13. [Route validation ideas](#route-validation-ideas-hiking--cycling)
-14. [Energy-based routing](#energy-based-routing-eco-mode-idea)
-15. [Elevation idea](#elevation-idea-srtm-family)
-16. [Fuel and charge monitoring ideas](#fuel-and-charge-monitoring-ideas)
-17. [History, UI, and configuration](#history-ui-and-configuration-ideas)
-18. [Mathematical formulas](#mathematical-formulas)
-19. [Vehicle / ECU protocols](PROTOCOLS.md)
-20. [Elevation source APIs](API.md)
-21. [APRS / moving icons](APRS.md)
-22. [CAT radio control](CAT.md)
+8. [Offline routing](#offline-routing)
+9. [Safety and legality ideas](#safety-and-legality-ideas)
+10. [Configurable rest parameters](#configurable-rest-parameters-idea-sketch)
+11. [Historical basis: rast and vei](#historical-basis-rast-and-vei)
+12. [Network and priority ideas](#network-and-priority-ideas)
+13. [Water safety ideas](#water-safety-ideas-hiking--cycling)
+14. [Route validation ideas](#route-validation-ideas-hiking--cycling)
+15. [Energy-based routing](#energy-based-routing-eco-mode-idea)
+16. [Elevation idea](#elevation-idea-srtm-family)
+17. [Fuel and charge monitoring ideas](#fuel-and-charge-monitoring-ideas)
+18. [History, UI, and configuration](#history-ui-and-configuration-ideas)
+19. [Mathematical formulas](#mathematical-formulas)
+20. [Vehicle / ECU protocols](PROTOCOLS.md)
+21. [External data APIs](API.md)
+22. [APRS / moving icons](APRS.md)
+23. [CAT radio control](CAT.md)
 
 ---
 
@@ -66,7 +67,7 @@ Suggested thread roles and relative priorities (highest first):
 
 | Thread / role | Priority | Responsibility |
 |---------------|----------|----------------|
-| **Sensors (GPS, IMU)** | Highest | Continuous position, heading, and motion samples; must not stall for map or DB work. |
+| **Sensors (GPS, IMU)** | Highest | Continuous position, heading, and motion samples; must not stall for map or DB work. **Reference:** Android fused location + rotation vector ([architecture.md](architecture.md#reference-sensor-source-android-gps-and-imu)). |
 | **ECU data** | High | Live fuel / engine reads (OBD-II, J1939, MegaSquirt); poll and decode without waiting on routing or UI. |
 | **Graphical / UI** | High–medium | Map redraw, display, menus, moving-icon updates; keep interaction smooth while background jobs run. |
 | **Routing calculations** | Medium | Rest-stop planning, energy cost walks, route validation; CPU-heavy, parallelizable across cores when segment work allows. |
@@ -126,11 +127,14 @@ Hard rules for APRS display (see [APRS.md](APRS.md)):
 
 - Show stations only within a **hardcoded 50–150 km** window (VHF/UHF reach); no unlimited range.
 - Station timeout **must not exceed 3600 s** (beacon intervals may run ~20–3000 s with speed).
-- Decoder handles **water** info and **QRV/qrv + frequency** (e.g. `146.500 MHz`, `145,500 mhz`) for optional CAT radio tune ([CAT.md](CAT.md)); label those stations with a leading `*`; full message only at **zoom > 14**.
+- Decoder handles **QRV/qrv + frequency** (e.g. `146.500 MHz`, `145,500 mhz`) for optional CAT radio tune ([CAT.md](CAT.md)); label those stations with a leading `*`; full message only at **zoom > 14**.
+- APRS **WX** (weather-station) beacons are a **future** optional source for weather-along-route — unrelated to drinking-water POIs; see [APRS.md](APRS.md).
 
 ---
 
-## Safety and legality ideas
+## Offline routing
+
+Route computation is **fully on-device** against locally downloaded OSM (and local DEM for energy costs). No hosted Valhalla/OSRM (or similar) call is used to build a route. Guidance/follow logic (e.g. Ferrostar) runs on-device only. OSM region/country downloads: [API.md](API.md). Details: [architecture.md](architecture.md#offline-routing-no-hosted-backends).
 
 ### Distance from buildings (camping / allemannsretten)
 
@@ -254,7 +258,7 @@ Try sources in order:
 2. Viewfinder Panoramas  
 3. NASA SRTMGL1  
 
-Downloads pausable/resumable/cancellable; progress tracked per region or per country job. How each source is listed, named, authenticated, and fetched is documented in [API.md](API.md).
+Downloads pausable/resumable/cancellable; progress tracked per region or per country job. How each DEM source is listed, named, authenticated, and fetched — and how OSM region/country `.pbf` files are obtained from Geofabrik — is documented in [API.md](API.md).
 
 ---
 
@@ -286,7 +290,7 @@ On shutdown, persist last shutdown time (and session state). On boot, compute of
 
 - Persist rest / fuel / charge history, consumption samples, trip summaries, and config across sessions. Fuel and charge stops appear in the same history view as rest stops.
 - Browse/clear history in the host UI; menu changes save automatically.
-- Host UI actions: suggest rest stop, suggest charge/fuel stop, history, start/end break, configure intervals per profile, overnight settings (buildings, glaciers, POI radii), charging-station filters (connector, power, access).
+- Host UI actions: suggest rest stop, suggest charge/fuel stop, history, start/end break, configure intervals per profile, overnight settings (buildings, glaciers, POI radii), charging-station filters (connector, power, access), **download OSM region/country** (Geofabrik — [API.md](API.md)), download elevation region/country.
 - Track session state: driving time, break in progress, mandatory break required — including time while powered off (see above).
 - Vehicle type selected via host configuration.
 - Keep behaviour portable: other open source navigation units should be able to host the same stop logic, energy model, and station compatibility without depending on one proprietary stack.

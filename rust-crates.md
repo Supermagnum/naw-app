@@ -36,13 +36,13 @@ Reference list of existing Rust crates that cover major subsystems, so core logi
 
 | Crate | What it does | Notes |
 |---|---|---|
-| [`ferrostar`](https://github.com/stadiamaps/ferrostar) | Cross-platform navigation core: route-following, off-route detection, distance-to-next-maneuver, state machine — designed as a **client** against a routing backend (Valhalla-focused, also supports OSRM-like APIs), not a route computation engine itself. | This is your navigation *shell* logic — reuse directly rather than reimplementing. |
-| [`routx`](https://lib.rs/crates/routx) | Converts OSM `.pbf` data into a weighted directed graph and runs A* for shortest paths. Supports one-way streets, access tags, turn restrictions, custom profiles. | Closest thing to a standalone Rust routing *engine* (the piece Ferrostar expects to talk to, if you don't want to run Valhalla/OSRM separately). Also ships C/C++ bindings. |
+| [`ferrostar`](https://github.com/stadiamaps/ferrostar) | Cross-platform navigation core: route-following, off-route detection, distance-to-next-maneuver, state machine. Upstream examples often talk to Valhalla/OSRM; **in this project Ferrostar is used only as the on-device guidance layer** against a locally computed route — never to fetch routes from a hosted service. | Navigation *shell* logic — reuse for follow/off-route; pair with on-device `routx` (or equivalent), not a network router. |
+| [`routx`](https://lib.rs/crates/routx) | Converts OSM `.pbf` data into a weighted directed graph and runs A* for shortest paths. Supports one-way streets, access tags, turn restrictions, custom profiles. | On-device routing *engine* for this project. Also ships C/C++ bindings. |
 | [`osm4routing2`](https://github.com/rust-transit/osm4routing2) | Extracts a routable street network (nodes/edges) from OSM `.pbf` into CSV, or usable as a library. Rust rewrite of the original `osm4routing`. | Graph *extraction* only — no pathfinding; pair with your own A*/Dijkstra or `routx`. |
 | [`osm_graph`](https://crates.io/crates/osm_graph) | Builds road networks from OSM data and generates isochrones (reachable-area-within-time-limit) for a given point. | Useful if you ever want "reachable POIs within N minutes" type features. |
 | [`pathfinding`](https://crates.io/crates/pathfinding) | General-purpose pathfinding algorithms (A*, Dijkstra, BFS, etc.) over arbitrary graphs, not OSM-specific. | Good building block if you construct your own graph structure from `osm4routing2` output. |
 
-**Practical pairing:** `ferrostar` for the navigation/guidance layer, talking either to an external Valhalla/OSRM instance **or** to a Rust-native graph built with `osm4routing2` (extraction) + `routx` or `pathfinding` (pathfinding) if you want to avoid running a separate routing server.
+**Practical pairing (this project):** on-device `osmpbf` + `routx` (and/or `osm4routing2` + `pathfinding`) for route **computation**; `ferrostar` for on-device route **following** only. **No** hosted Valhalla/OSRM (or similar) for routing — see [architecture.md](architecture.md#offline-routing-no-hosted-backends).
 
 ---
 
@@ -73,7 +73,8 @@ Reference list of existing Rust crates that cover major subsystems, so core logi
 
 ## Summary — suggested starting stack
 
-- **Elevation:** `geotiff` (Copernicus DEM) + `srtm_reader` (SRTM/Viewfinder Panoramas fallback) + custom fetcher.
-- **IMU:** hardware driver (`bno055`/`bno08x_rs` if onboard fusion, else `bmi160-rs` + `uf-ahrs`).
-- **Routing:** `ferrostar` (navigation core) + `osm4routing2`/`routx` (graph + pathfinding) or an external Valhalla/OSRM backend.
+- **Elevation:** `geotiff` (Copernicus DEM) + `srtm_reader` (SRTM/Viewfinder Panoramas fallback) + custom fetcher; optional Open-Meteo Elevation when online ([API.md](API.md)).
+- **IMU:** **Android reference:** OS `TYPE_ROTATION_VECTOR` via JNI/UniFFI ([architecture.md](architecture.md#reference-sensor-source-android-gps-and-imu)). Embedded/non-Android: hardware driver (`bno055`/`bno08x_rs` if onboard fusion, else `bmi160-rs` + `uf-ahrs`).
+- **Routing:** on-device only — `osmpbf` + `routx` (and/or `osm4routing2` + `pathfinding`) for pathfinding; `ferrostar` for guidance/follow. **No** hosted Valhalla/OSRM.
 - **Database:** `rusqlite` + `rstar` for spatial POI indexing.
+- **OSM data:** Geofabrik region/country `.osm.pbf` downloads ([API.md](API.md)).

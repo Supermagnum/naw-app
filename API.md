@@ -1,26 +1,93 @@
-# Elevation data APIs
+# External data APIs and downloads
 
-How an open source navigation host should talk to the three elevation sources used for rest stops and energy routing (try in this order):
+How the navigation host obtains **optional** network-backed datasets (OSM extracts, elevation tiles, weather). Core routing and navigation must work **fully offline** from data already on disk; nothing in this file is required to compute a route.
+
+Elevation sources used for rest stops and energy routing (try in this order when downloading DEM tiles):
 
 1. Copernicus DEM GLO-30  
 2. Viewfinder Panoramas (dem3)  
 3. NASA SRTMGL1  
+4. Open-Meteo Elevation (optional fourth fallback — see [External Data Sources](#external-data-sources))
 
-Downloads must support pause / resume / cancel, progress per region or entire-country job, and local tile cache lookup before network fetch. Void / missing elevation is commonly represented as `-32768` for HGT-style products.
+DEM downloads must support pause / resume / cancel, progress per region or entire-country job, and local tile cache lookup before network fetch. Void / missing elevation is commonly represented as `-32768` for HGT-style products.
 
 ---
 
 ## Table of contents
 
-1. [Common host interface](#common-host-interface)
-2. [Copernicus DEM GLO-30](#copernicus-dem-glo-30)
-3. [Viewfinder Panoramas](#viewfinder-panoramas)
-4. [NASA SRTMGL1](#nasa-srtmgl1)
-5. [Fallback order and country jobs](#fallback-order-and-country-jobs)
+1. [External Data Sources](#external-data-sources)
+2. [OSM region and country extracts (Geofabrik)](#osm-region-and-country-extracts-geofabrik)
+3. [Common elevation host interface](#common-elevation-host-interface)
+4. [Copernicus DEM GLO-30](#copernicus-dem-glo-30)
+5. [Viewfinder Panoramas](#viewfinder-panoramas)
+6. [NASA SRTMGL1](#nasa-srtmgl1)
+7. [Elevation fallback order and country jobs](#elevation-fallback-order-and-country-jobs)
 
 ---
 
-## Common host interface
+## External Data Sources
+
+Every row is **opt-in and network-dependent**. The app must navigate and route using only locally stored OSM + DEM; these sources are enhancement / acquisition layers, never a requirement for core routing.
+
+| Source | Provides | API key | Rate limits / access | License / attribution |
+|--------|----------|---------|----------------------|------------------------|
+| **Geofabrik** | OSM region/country `.osm.pbf` extracts; `.osc.gz` diffs; `.poly` boundaries | No | Free public HTTPS download; daily-updated extracts | **ODbL** — attribution required |
+| **Open-Meteo** | Weather forecast; also Marine Forecast, Flood, Air Quality, Geocoding, Elevation | No (no sign-up) | Non-commercial up to **10,000 requests/day** (check current Open-Meteo terms) | **CC BY 4.0** — attribution required |
+| **Copernicus DEM GLO-30** | ~30 m DEM tiles (COG on public S3) | No (unsigned S3) | Public bucket read; some land tiles may be withheld | Copernicus / open-data licence — follow bucket readme terms |
+| **Viewfinder Panoramas** | 1° dem3 HGT (often via ZIP) | No | HTTP download; coverage incomplete in places | Follow Viewfinder Panoramas terms / attribution as published for the product used |
+| **NASA SRTMGL1** | 1″ SRTM HGT granules | **Earthdata Login** required for download | CMR search free; download authenticated | NASA Earthdata / LP DAAC citation rules |
+
+**Open-Meteo notes (future / optional):**
+
+- **Marine Forecast** — wave height/period, swell, etc.; relevant to [Future Marine Extensions](architecture.md#future-marine-extensions-not-yet-implemented) (not required for land v1).  
+- **Elevation** — possible **fourth** DEM fallback after Copernicus → Viewfinder → SRTMGL1 when online and the user opts in.  
+- Same “weather along route” future feature may use Open-Meteo **and/or** APRS WX stations ([APRS.md](APRS.md)); they are independent optional sources.
+
+---
+
+## OSM region and country extracts (Geofabrik)
+
+Primary source for on-device map/routing data: **Geofabrik** downloads (`download.geofabrik.de`). Free, **daily-updated** `.osm.pbf` extracts, no authentication. Organised by continent → country → optional sub-region.
+
+### URL pattern
+
+```text
+https://download.geofabrik.de/<continent>/<region>-latest.osm.pbf
+```
+
+Examples:
+
+```text
+https://download.geofabrik.de/europe/norway-latest.osm.pbf
+https://download.geofabrik.de/europe/germany/bayern-latest.osm.pbf
+```
+
+Sub-region (state/county) files exist where Geofabrik publishes them; otherwise use the country extract.
+
+### Companion files
+
+| File | Role |
+|------|------|
+| `*-latest.osm.pbf` | Full extract for offline routing/map build |
+| `*.osc.gz` (or dated diffs under the same tree) | Incremental updates so a region can be refreshed without re-fetching the full `.pbf` |
+| `*.poly` | Region boundary polygon — clip/validate that a downloaded extract matches the expected coverage |
+
+### Design implication
+
+The host UI action **download region / country** maps to:
+
+1. User selects continent → country → optional sub-region.  
+2. App constructs the Geofabrik URL from that selection.  
+3. Download `.osm.pbf` (pause/resume/cancel; progress UI).  
+4. Optionally fetch `.poly` to validate coverage.  
+5. Feed the file through the existing **`osmpbf`** parse → graph build pipeline ([architecture.md](architecture.md#offline-routing-no-hosted-backends)).  
+6. Later: apply `.osc.gz` diffs for incremental refresh.
+
+**Attribution:** show ODbL / OpenStreetMap credit in the app (About / map chrome) whenever Geofabrik/OSM data is used.
+
+---
+
+## Common elevation host interface
 
 Suggested internal operations (language-agnostic):
 
@@ -30,7 +97,7 @@ Suggested internal operations (language-agnostic):
 | `tile_exists(tile_id)` | True if a usable local file is in the elevation data directory. |
 | `get_elevation(lat, lon)` | Read height from the preferred available source for that tile. |
 | `download_tiles(bbox \| country)` | Queue tile downloads; track progress; allow pause/resume/cancel. |
-| `source_priority` | Ordered list: Copernicus → Viewfinder → SRTMGL1. |
+| `source_priority` | Ordered list: Copernicus → Viewfinder → SRTMGL1 → (optional) Open-Meteo Elevation. |
 
 Tile index for HGT-family products (Viewfinder / SRTMGL1):
 
@@ -234,13 +301,14 @@ Follow NASA Earthdata / LP DAAC citation and redistribution rules for the produc
 
 ---
 
-## Fallback order and country jobs
+## Elevation fallback order and country jobs
 
 1. For each required tile, try local cache.  
 2. Else try Copernicus GLO-30 object GET.  
 3. Else try Viewfinder dem3 HTTP ZIP.  
 4. Else try NASA SRTMGL1 via CMR + Earthdata download.  
-5. If all fail, mark tile missing; elevation queries return void.
+5. Else (optional, opt-in, online): Open-Meteo Elevation endpoint.  
+6. If all fail, mark tile missing; elevation queries return void.
 
 **Region job:** download all tiles intersecting a bbox.  
 **Country job:** expand country polygon/bbox to the tile set, then run the same queue with one progress counter for the whole country.

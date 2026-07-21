@@ -12,7 +12,7 @@ Ideas for Automatic Packet Reporting System (APRS) support on open source naviga
 4. [Architecture](#architecture)
 5. [Packet sources](#packet-sources)
 6. [Protocol layers](#protocol-layers)
-7. [Decoder: water, QRV, and CAT frequency](#decoder-water-qrv-and-cat-frequency)
+7. [Decoder: WX (future), QRV, and CAT frequency](#decoder-wx-future-qrv-and-cat-frequency)
 8. [Symbols](#symbols)
 9. [Range filtering (hardcoded)](#range-filtering-hardcoded)
 10. [Frequencies (receive)](#frequencies-receive)
@@ -48,7 +48,7 @@ This is a required capability of the overall idea set: the map must support **dy
 | Move | On later packets for the same callsign, update coordinates (and optional course/speed) in place — the icon translates on the map. |
 | Identity | Key stations by callsign (and SSID); do not spawn a new icon per packet. |
 | Symbol | Icon from APRS symbol table + code (see [Symbols](#symbols)); fallback to a default POI icon if unknown. |
-| QRV mark | If the station’s comment/message carries a parseable QRV + frequency, show a `*` prefix on the label (see [Decoder](#decoder-water-qrv-and-cat-frequency)). |
+| QRV mark | If the station’s comment/message carries a parseable QRV + frequency, show a `*` prefix on the label (see [Decoder](#decoder-wx-future-qrv-and-cat-frequency)). |
 | Label zoom | Full message/comment text is shown only when map zoom level is **greater than 14**; at lower zoom show callsign (and `*` if applicable) only. |
 | Stale | After timeout without packets (max 3600 s), remove or dim the icon. |
 | Threading | Packet ingest and DB writes must not block GPS/UI; map item updates marshalled to the graphics thread (see concurrency notes in `README.md`). |
@@ -59,7 +59,8 @@ This is a required capability of the overall idea set: the map must support **dy
 - Range queries within the hardcoded VHF/UHF-useful window.
 - Restoring icons after app restart until they expire.
 - Future: route-to-station when the host supports routing to dynamic targets.
-- Holding parsed water and QRV/frequency fields for UI and CAT control.
+- Holding QRV/frequency fields for UI and CAT control.
+- Optional future: decoded APRS WX (weather-station) telemetry for weather-along-route — **not** drinking-water / POI water features.
 
 ---
 
@@ -85,7 +86,7 @@ Split into two modules (same idea as a dedicated APRS host + optional SDR fronte
 Responsibilities:
 
 - AX.25 / APRS parse and position validation  
-- Comment parsing: water information, QRV + frequency → CAT  
+- Comment parsing: QRV + frequency → CAT; optional future WX (weather-station) decode  
 - SQLite (or equivalent) station store  
 - Moving map items / icon updates (`*` prefix, zoom-gated full text)  
 - Station expiration (timeout ≤ 3600 s) and hardcoded range filtering  
@@ -150,7 +151,7 @@ Position and symbol live in the information field (compressed or uncompressed fo
 !5132.00N/00007.00W-Test
 ```
 
-Symbol table and code sit in that field (here `/` and `-`). Free-text comment after the position can carry weather/water notes and QRV lines.
+Symbol table and code sit in that field (here `/` and `-`). Free-text comment after the position can carry QRV lines and (on WX stations) weather telemetry.
 
 ### AX.25 UI
 
@@ -169,17 +170,21 @@ SDR DSP sketch: mix to baseband → DC block → FM discriminator → bit PLL �
 
 ---
 
-## Decoder: weater, QRV, and CAT frequency
+## Decoder: WX (future), QRV, and CAT frequency
 
 The decoder must inspect the APRS information field / comment, not only lat/lon and symbol.
 
-### Weater information
+### APRS weather stations (WX) — future, out of scope for active use
 
-Parse and store weater-related content when present, for example:
+APRS **weather-station** beacons (WX reports: wind, temperature, rain, pressure, etc.) are a distinct packet/telemetry class. They have **no relationship** to drinking-water POIs, water-safety guidance, or refill discovery documented elsewhere ([README.md](README.md) water-safety / POI sections).
 
-- APRS weatherfields where the packet type carries them.
-- Free-text mentions useful to hikers and boaters (weater, flood, tide, well, spring, etc.) so the UI can flag or filter stations that advertise weater context.
-- Keep raw comment text; attach structured flags/fields when recognition is confident.
+| Status | Detail |
+|--------|--------|
+| Now | Do not treat WX decode as a product requirement for v1 moving-icon / QRV features. |
+| Future | Optional extension: show conditions along a planned route from nearby APRS WX stations. |
+| Alternate source | The same future “weather along route” feature may **also** (or instead) pull from a free online weather API when the user has connectivity and opts in (e.g. Open-Meteo — [API.md](API.md)). |
+
+APRS WX and an online weather API are **two independent, optional data sources** for that future feature — not the same mechanism.
 
 ### QRV and frequency → CAT
 
@@ -198,7 +203,7 @@ Parsing rules (idea):
 - Normalise to Hz (e.g. `146.500 MHz` → 146500000; `145,500 mhz` → 145500000).  
 - Validate against a sane VHF/UHF amateur range before offering CAT tune (reject garbage parses).
 
-**CAT control:** the parsed frequency can be sent to a radio over a CAT interface (e.g. Hamlib or vendor serial/USB CAT) so the radio is set to the frequency shown in the message. Tuning should be explicit/user-confirmed unless the user enables auto-tune. Command dialects, baud rates, and serial formats are documented in [CAT.md](CAT.md).
+**CAT control:** the parsed frequency can be sent to a radio over a CAT interface via **Hamlib** so the radio is set to the frequency shown in the message. Tuning should be explicit/user-confirmed unless the user enables auto-tune. Command dialects, baud rates, and serial formats are documented in [CAT.md](CAT.md).
 
 ### Map label rules for QRV messages
 

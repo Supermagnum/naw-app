@@ -18,18 +18,20 @@ Companion product-idea docs: [README.md](README.md), [PROTOCOLS.md](PROTOCOLS.md
 4. [System overview](#system-overview)
 5. [Crate and module layout](#crate-and-module-layout)
 6. [Thread and priority model](#thread-and-priority-model)
-7. [Inter-thread communication](#inter-thread-communication)
-8. [Core native modules](#core-native-modules)
-9. [Plugin host architecture](#plugin-host-architecture)
-10. [Capability-based host API](#capability-based-host-api)
-11. [Plugin manifest](#plugin-manifest)
-12. [Map layers and moving icons](#map-layers-and-moving-icons)
-13. [Registering layers, POIs, and overlays from plugins](#registering-layers-pois-and-overlays-from-plugins)
-14. [Planned plugin categories](#planned-plugin-categories)
-15. [Future Marine Extensions (Not Yet Implemented)](#future-marine-extensions-not-yet-implemented)
-16. [Data storage](#data-storage)
-17. [Failure, fuel, and hang isolation](#failure-fuel-and-hang-isolation)
-18. [Security non-goals and hard denials](#security-non-goals-and-hard-denials)
+7. [Reference sensor source: Android GPS and IMU](#reference-sensor-source-android-gps-and-imu)
+8. [Inter-thread communication](#inter-thread-communication)
+9. [Core native modules](#core-native-modules)
+10. [Offline routing (no hosted backends)](#offline-routing-no-hosted-backends)
+11. [Plugin host architecture](#plugin-host-architecture)
+12. [Capability-based host API](#capability-based-host-api)
+13. [Plugin manifest](#plugin-manifest)
+14. [Map layers and moving icons](#map-layers-and-moving-icons)
+15. [Registering layers, POIs, and overlays from plugins](#registering-layers-pois-and-overlays-from-plugins)
+16. [Planned plugin categories](#planned-plugin-categories)
+17. [Future Marine Extensions (Not Yet Implemented)](#future-marine-extensions-not-yet-implemented)
+18. [Data storage](#data-storage)
+19. [Failure, fuel, and hang isolation](#failure-fuel-and-hang-isolation)
+20. [Security non-goals and hard denials](#security-non-goals-and-hard-denials)
 
 ---
 
@@ -209,6 +211,42 @@ Priority (high → low)
 
 ---
 
+## Reference sensor source: Android GPS and IMU
+
+The **reference / default implementation** targets **Android** as the sensor source for the T0 sensor thread. Other platforms (embedded Linux head units, iOS) are **future targets**, not in scope for the reference implementation.
+
+### GPS (Android)
+
+| Path | API | Role |
+|------|-----|------|
+| **Preferred** | `FusedLocationProviderClient` (Google Play services location / fused provider) | Blends GPS, network, and sensor data; best default for navigation |
+| **Fallback** | `LocationManager` | Raw GPS-only (or provider-specific) when fused location is unavailable or a GPS-only fix is required |
+
+Fixes are forwarded into the Rust core sensor thread as timestamped position samples (and used for GPS wall time when there is no RTC).
+
+### IMU (Android)
+
+| Path | API | Role |
+|------|-----|------|
+| **Primary** | `SensorManager` + `TYPE_ROTATION_VECTOR` | OS-level fusion of accelerometer + gyroscope + magnetometer; prefer this over reimplementing AHRS in Rust on Android |
+| **Fallback / custom** | `TYPE_ACCELEROMETER`, `TYPE_GYROSCOPE` (and magnetometer if needed) | Raw streams when rotation vector is missing or for experimental custom fusion |
+
+### Rust IMU crates vs Android
+
+Crates such as `uf-ahrs`, `imu-fusion`, and discrete chip drivers (`bno055`, `bmi160-rs`, etc. — see [rust-crates.md](rust-crates.md)) are for **non-Android / embedded** targets (e.g. a dedicated ARM head unit with a discrete IMU). On Android, **prefer the OS-provided fused rotation vector**; do not run a parallel software AHRS on the same phone sensors unless diagnosing or targeting a non-Android build.
+
+### JNI / UniFFI boundary
+
+Android location and `SensorManager` callbacks live in the JVM/Kotlin (or Java) layer. They must cross into the Rust core via **JNI and/or UniFFI** (or an equivalent FFI bridge) and publish onto the T0 sensor channel. The bridge must be non-blocking for the Android callback threads: copy sample → `try_send` / slot update → return. No SQLite, routing, or plugin work on that path.
+
+```text
+Android FusedLocation / SensorManager
+        ↓  JNI or UniFFI
+Rust core sensors (T0)  →  WorldSnapshot slot
+```
+
+---
+
 ## Inter-thread communication
 
 ### Principles
@@ -248,16 +286,41 @@ All of the following are **trusted native Rust** inside `core` (not sandboxed).
 
 | Module | Responsibility |
 |--------|----------------|
-| **Sensors** | GPS (NMEA/gnssd/Android location), IMU fusion inputs; GPS time for RTC-less offline elapsed ([README.md](README.md)) |
+| **Sensors** | **Android reference:** fused location + rotation vector via JNI/UniFFI (see above). Non-Android: NMEA/gnssd and/or discrete IMU + Rust fusion crates. GPS time for RTC-less offline elapsed ([README.md](README.md)) |
 | **ECU / BMS** | OBD-II (ELM327), J1939 (SocketCAN), MegaSquirt (serial); EV SoC/power adapters as they mature ([PROTOCOLS.md](PROTOCOLS.md)) |
 | **Radio CAT** | Hamlib only ([CAT.md](CAT.md)); tune from parsed QRV frequencies |
-| **Routing** | Rest-stop planning, energy/eco segment costs, route validation (forbidden roads, military areas, depth constraints when bathymetry layer present) |
+| **Routing** | **Fully offline** rest-stop planning, energy/eco segment costs, route validation — see [Offline routing](#offline-routing-no-hosted-backends) |
 | **Map load/render** | Basemap layers (OSM, Tracestrack Topo, CyclOSM, Cycle Map), tile cache, OSM POI icons |
 | **POI search** | Spatial index (R-tree or equivalent) over OSM + runtime categories |
 | **Storage** | SQLite for config, rest/fuel/charge history, adaptive fuel samples, APRS/AIS track cache owned by core policy |
 | **Time** | Shutdown/boot offline duration; GPS preferred without RTC |
 
-Elevation downloads (Copernicus / Viewfinder / SRTMGL1) are core services using [API.md](API.md) interfaces; progress jobs run at T3/T4 priority, not T0.
+Elevation downloads (Copernicus / Viewfinder / SRTMGL1) and OSM region/country extracts are core services using [API.md](API.md) interfaces; progress jobs run at T3/T4 priority, not T0.
+
+---
+
+## Offline routing (no hosted backends)
+
+Routing **runs entirely on-device**. There is **no** network call to compute a route — ever. External services such as hosted **Valhalla** or **OSRM** are **not** an option for this product.
+
+| Piece | Role |
+|-------|------|
+| Local OSM data | User-downloaded region/country `.osm.pbf` (Geofabrik — [API.md](API.md)) |
+| Graph build / pathfinding | On-device pipeline: `osmpbf` parse → routable graph (`routx` and/or `osm4routing2` + `pathfinding`) with `rstar` / `geo` as needed, plus elevation reweighting from local DEM tiles |
+| Rest stops / energy / validation | Core routing module on T3 against that local graph and local elevation |
+| **Ferrostar** | On-device **navigation / guidance state machine** only: route-following, off-route detection, maneuver progress — **not** a client that fetches routes from a hosted backend |
+
+```text
+local .osm.pbf + local DEM
+        ↓
+osmpbf → graph (routx / …) → A* / profile costs (offline)
+        ↓
+active route geometry
+        ↓
+Ferrostar: follow / off-route / maneuvers (on-device)
+```
+
+Optional network use (elevation tile download, OSM extract download, opt-in weather APIs) is **data acquisition only**, never route computation. Core navigation must work with only local OSM + DEM already on disk.
 
 ---
 
